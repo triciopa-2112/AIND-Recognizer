@@ -76,8 +76,25 @@ class SelectorBIC(ModelSelector):
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        best = float("inf")
+        best_model = None
+
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            model = self.base_model(n)
+            try:
+                logL = model.score(self.X, self.lengths)  # logL: log liklihood of the fitted model
+            except:
+                return None
+
+            p = n * n + 2 * n * model.n_features - 1
+            logN = np.log(len(self.X))
+            score = -2 * logL + p * logN
+
+            if score < best:
+                best_model = model
+                best = score
+
+        return best_model
 
 
 class SelectorDIC(ModelSelector):
@@ -91,10 +108,29 @@ class SelectorDIC(ModelSelector):
     '''
 
     def select(self):
-        warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+        try:
+            best_score = float("-Inf")
+            best_model = None
+            words = self.words.keys()
+
+            for n in range(self.min_n_components, self.max_n_components + 1):
+                model = self.base_model(n)
+                scores = []
+                for word in words:
+                    if not (word == self.this_word):
+                        word_X, word_lengths = self.hwords[word]
+                        scores.append(model.score(word_X, word_lengths))
+                score = model.score(self.X, self.lengths) - np.mean(scores)
+                if (score > best_score):
+                    best_score = score
+                    best_model = model
+            return best_model
+        except:
+            return self.base_model(self.n_constant)
 
 
 class SelectorCV(ModelSelector):
@@ -104,6 +140,34 @@ class SelectorCV(ModelSelector):
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        avg_prev = 0
+        best = float('-inf')
+        components = None
+        split_method = KFold(2 if len(self.sequences)<3 else 3)
+
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            scores = []
+            try:
+                for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+                    p_X = self.X
+                    p_lengths = self.lengths
+                    X, lengths = combine_sequences(cv_train_idx, self.sequences)
+                    self.X = X
+                    self.lengths = lengths
+                    model = self.base_model(n)
+                    X, lengths = combine_sequences(cv_test_idx, self.sequences)
+                    try:
+                        scores.append(model.score(n, X, lengths))
+                    except:
+                        continue
+                    self.X, self.lengths = p_X, p_lengths
+                avg = np.average(scores)
+            except:
+                continue
+
+            if avg_prev == 0 or avg_prev < avg:
+                avg_prev = avg
+                components = n
+        return self.base_model(components)
